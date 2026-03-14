@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPU Cost Comparison — GPT-OSS 20B & Qwen2.5-Coder 32B</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #05080f;
+  --surface: #0b1018;
+  --surface2: #101620;
+  --surface3: #151d28;
+  --border: rgba(255,255,255,.06);
+  --border2: rgba(255,255,255,.1);
+  --text: #e8edf5;
+  --muted: #4a6080;
+  --dim: #2a3a50;
+  --accent: #00d4ff;
+  --accent2: #0099cc;
+  --green: #00e5a0;
+  --amber: #ffb830;
+  --red: #ff4d6a;
+  --purple: #a78bfa;
+  --mono: 'IBM Plex Mono', monospace;
+  --display: 'Syne', sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--display);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* GRID BACKGROUND */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0,212,255,.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,212,255,.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* GLOW ORBS */
+.orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(120px);
+  pointer-events: none;
+  z-index: 0;
+}
+.orb-1 { width: 500px; height: 500px; background: rgba(0,212,255,.06); top: -100px; left: -100px; }
+.orb-2 { width: 400px; height: 400px; background: rgba(167,139,250,.05); bottom: -100px; right: -50px; }
+
+.container { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 0 24px 80px; }
+
+/* HEADER */
+header {
+  padding: 52px 0 40px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 40px;
+}
+.header-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.header-tag::before {
+  content: '';
+  display: inline-block;
+  width: 20px;
+  height: 1px;
+  background: var(--accent);
+}
+h1 {
+  font-size: clamp(28px, 5vw, 48px);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -.02em;
+  margin-bottom: 14px;
+}
+h1 span { color: var(--accent); }
+.header-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.header-meta span { display: flex; align-items: center; gap: 6px; }
+.dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); display: inline-block; animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* CONTROLS */
+.controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+}
+.tab-btn {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: 10px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all .15s;
+}
+.tab-btn:hover { color: var(--text); border-color: var(--dim); }
+.tab-btn.active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+
+/* STAT STRIP */
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 32px;
+}
+@media(max-width:640px){ .stat-strip { grid-template-columns: 1fr 1fr; } }
+.stat {
+  background: var(--surface);
+  padding: 16px 20px;
+}
+.stat-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.stat-val {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--accent);
+  line-height: 1;
+}
+.stat-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+/* TABLE SECTION */
+.model-section { display: none; }
+.model-section.active { display: block; }
+
+.section-hdr {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.section-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+.section-req {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: .06em;
+}
+
+.tier-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  padding: 18px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tier-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.table-wrap { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead { background: var(--surface2); }
+th {
+  padding: 10px 14px;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+tr:last-child td { border-bottom: none; }
+tbody tr { background: var(--surface); transition: background .1s; }
+tbody tr:hover { background: var(--surface2); }
+tbody tr.winner { background: rgba(0,229,160,.04); }
+tbody tr.winner:hover { background: rgba(0,229,160,.07); }
+
+.gpu-name {
+  font-weight: 700;
+  font-size: 13.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.star { color: var(--amber); font-size: 12px; }
+.vram-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 2px 6px;
+  background: var(--surface3);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--muted);
+}
+
+.fit-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 3px;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.fit-best { background: rgba(0,212,255,.12); color: var(--accent); border: 1px solid rgba(0,212,255,.25); }
+.fit-good { background: rgba(0,229,160,.1); color: var(--green); border: 1px solid rgba(0,229,160,.2); }
+.fit-tight { background: rgba(255,184,48,.1); color: var(--amber); border: 1px solid rgba(255,184,48,.2); }
+
+.price-cell {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.price-hr { color: var(--text); font-weight: 500; }
+.price-mo { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.na { color: var(--dim); font-family: var(--mono); font-size: 11px; }
+
+.cheapest-tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--green);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border: 1px solid rgba(0,229,160,.3);
+  border-radius: 2px;
+}
+
+/* CALLOUT */
+.callout {
+  background: var(--surface2);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+  padding: 12px 16px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin-top: 12px;
+  margin-bottom: 28px;
+}
+.callout strong { color: var(--text); }
+.callout.green { border-left-color: var(--green); }
+.callout.amber { border-left-color: var(--amber); }
+
+/* PROVIDER LEGEND */
+.legend {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.leg {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.leg-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+/* FOOTER */
+footer {
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  line-height: 1.8;
+}
+footer a { color: var(--accent2); text-decoration: none; }
+footer a:hover { color: var(--accent); }
+
+/* TOGGLE FOR MONTHLY/HOURLY */
+.view-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.view-btn {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 6px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all .15s;
+  letter-spacing: .06em;
+}
+.view-btn.active { background: var(--surface3); color: var(--text); border-color: var(--border2); }
+.controls-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+
+<div class="container">
+
+  <!-- HEADER -->
+  <header>
+    <div class="header-tag">GPU Cost Comparison · March 2026</div>
+    <h1>Host <span>GPT-OSS 20B</span> &<br>Qwen2.5-Coder 32B</h1>
+    <p style="color:var(--muted);font-size:14px;max-width:560px;line-height:1.6;margin-top:10px">
+      Compatible GPUs across Vast.ai, RunPod, and Nebius — filtered to only show cards that actually run each model. Prices verified from ComputePrices.com.
+    </p>
+    <div class="header-meta">
+      <span><span class="dot"></span> Live pricing · March 13, 2026</span>
+      <span>// Source: computeprices.com</span>
+      <span>// 730 hrs/mo = 24/7</span>
+    </div>
+  </header>
+
+  <!-- MODEL TABS -->
+  <div class="controls">
+    <button class="tab-btn active" onclick="showModel('qwen', this)">Qwen2.5-Coder 32B</button>
+    <button class="tab-btn" onclick="showModel('gptoss', this)">GPT-OSS 20B</button>
+  </div>
+
+  <!-- STAT STRIP -->
+  <div class="stat-strip" id="stat-strip">
+    <div class="stat">
+      <div class="stat-label">Min VRAM required</div>
+      <div class="stat-val" id="stat-vram">24 GB</div>
+      <div class="stat-sub">4-bit AWQ quantized</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Cheapest GPU</div>
+      <div class="stat-val" id="stat-cheapest-gpu">RTX 3090</div>
+      <div class="stat-sub" id="stat-cheapest-sub">Vast.ai from $0.09/hr</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Best value pick</div>
+      <div class="stat-val" id="stat-best">RTX 4090</div>
+      <div class="stat-sub" id="stat-best-sub">Performance per dollar</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Cheapest monthly</div>
+      <div class="stat-val" id="stat-mo">$66/mo</div>
+      <div class="stat-sub" id="stat-mo-sub">RTX 3090 low · Vast.ai</div>
+    </div>
+  </div>
+
+  <!-- QWEN TABLE -->
+  <div class="model-section active" id="section-qwen">
+    <div class="section-hdr">
+      <div class="section-title">Qwen2.5-Coder 32B · 4-bit AWQ</div>
+      <div class="section-req">Min 22 GB VRAM · 24 GB cards minimum</div>
+    </div>
+
+    <div class="controls-row">
+      <div class="legend">
+        <div class="leg"><div class="leg-dot" style="background:var(--accent)"></div>Vast.ai</div>
+        <div class="leg"><div class="leg-dot" style="background:var(--green)"></div>RunPod</div>
+        <div class="leg"><div class="leg-dot" style="background:var(--purple)"></div>Nebius</div>
+      </div>
+      <div class="view-toggle">
+        <button class="view-btn active" onclick="setView('hr',this)">Per hr</button>
+        <button class="view-btn" onclick="setView('mo',this)">Per mo</button>
+      </div>
+    </div>
+
+    <!-- TIER 1: 24 GB -->
+    <div class="tier-label">24 GB — minimum viable</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>GPU</th>
+            <th>VRAM</th>
+            <th>Fit</th>
+            <th>Vast.ai</th>
+            <th>RunPod</th>
+            <th>Nebius</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="gpu-name">RTX 3090</div></td>
+            <td><span class="vram-badge">24 GB</span></td>
+            <td><span class="fit-badge fit-good">Works</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.09 – $0.21</div>
+              <div class="price-hr show-mo" style="display:none">$66 – $153</div>
+              <div class="price-mo">Ampere · needs Triton for MXFP4</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.11 – $0.27</div>
+              <div class="price-hr show-mo" style="display:none">$80 – $197</div>
+              <div class="price-mo">Community + Secure tiers</div>
+            </td>
+            <td><span class="na">— not listed</span></td>
+          </tr>
+          <tr class="winner">
+            <td><div class="gpu-name">RTX 4090 <span class="star">★</span></div></td>
+            <td><span class="vram-badge">24 GB</span></td>
+            <td><span class="fit-badge fit-best">Best</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.33 – $0.56</div>
+              <div class="price-hr show-mo" style="display:none">$241 – $409</div>
+              <div class="price-mo">Ada arch · native AWQ <span class="cheapest-tag">cheapest best</span></div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.39 – $0.59</div>
+              <div class="price-hr show-mo" style="display:none">$285 – $431</div>
+              <div class="price-mo">Community / Secure</div>
+            </td>
+            <td><span class="na">— not listed</span></td>
+          </tr>
+          <tr>
+            <td><div class="gpu-name">RTX A5000</div></td>
+            <td><span class="vram-badge">24 GB</span></td>
+            <td><span class="fit-badge fit-good">Works</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.19 – $0.20</div>
+              <div class="price-hr show-mo" style="display:none">$139 – $146</div>
+              <div class="price-mo">Ampere workstation</div>
+            </td>
+            <td><span class="na">— not listed</span></td>
+            <td><span class="na">— not listed</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- TIER 2: 48 GB -->
+    <div class="tier-label">48 GB — comfortable headroom</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>GPU</th><th>VRAM</th><th>Fit</th>
+            <th>Vast.ai</th><th>RunPod</th><th>Nebius</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="winner">
+            <td><div class="gpu-name">L40S <span class="star">★</span></div></td>
+            <td><span class="vram-badge">48 GB</span></td>
+            <td><span class="fit-badge fit-best">Best</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.31 – $0.68</div>
+              <div class="price-hr show-mo" style="display:none">$226 – $496</div>
+              <div class="price-mo">Ada arch · best 48 GB value</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.40 – $0.79</div>
+              <div class="price-hr show-mo" style="display:none">$292 – $577</div>
+              <div class="price-mo">Community / Secure</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$1.55</div>
+              <div class="price-hr show-mo" style="display:none">$1,132</div>
+              <div class="price-mo">Only 48 GB option on Nebius</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="gpu-name">A40 / RTX A6000</div></td>
+            <td><span class="vram-badge">48 GB</span></td>
+            <td><span class="fit-badge fit-best">Best</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.32 – $0.47</div>
+              <div class="price-hr show-mo" style="display:none">$234 – $343</div>
+              <div class="price-mo">Ampere · solid value</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.40</div>
+              <div class="price-hr show-mo" style="display:none">$292</div>
+              <div class="price-mo">Community only</div>
+            </td>
+            <td><span class="na">— not listed</span></td>
+          </tr>
+          <tr>
+            <td><div class="gpu-name">RTX 6000 Ada</div></td>
+            <td><span class="vram-badge">48 GB</span></td>
+            <td><span class="fit-badge fit-best">Best</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.20 – $0.65</div>
+              <div class="price-hr show-mo" style="display:none">$146 – $475</div>
+              <div class="price-mo">Ada arch · fast inference</div>
+            </td>
+            <td><span class="na">— not listed</span></td>
+            <td><span class="na">— not listed</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- TIER 3: 80 GB -->
+    <div class="tier-label">80 GB — runs both models simultaneously</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>GPU</th><th>VRAM</th><th>Fit</th>
+            <th>Vast.ai</th><th>RunPod</th><th>Nebius</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="gpu-name">A100 SXM 80 GB</div></td>
+            <td><span class="vram-badge">80 GB</span></td>
+            <td><span class="fit-badge fit-best">Best</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.67 – $0.87</div>
+              <div class="price-hr show-mo" style="display:none">$489 – $635</div>
+              <div class="price-mo">Both models fit (38 GB combined)</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.79 – $1.39</div>
+              <div class="price-hr show-mo" style="display:none">$577 – $1,015</div>
+              <div class="price-mo">Community / Secure</div>
+            </td>
+            <td><span class="na">— not listed</span></td>
+          </tr>
+          <tr>
+            <td><div class="gpu-name">H100 80 GB</div></td>
+            <td><span class="vram-badge">80 GB</span></td>
+            <td><span class="fit-badge fit-best">Best</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$1.55 – $2.27</div>
+              <div class="price-hr show-mo" style="display:none">$1,132 – $1,657</div>
+              <div class="price-mo">Fastest single GPU option</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$1.35 – $2.69</div>
+              <div class="price-hr show-mo" style="display:none">$986 – $1,964</div>
+              <div class="price-mo">PCIe (low) to SXM (high)</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$3.06</div>
+              <div class="price-hr show-mo" style="display:none">$2,234</div>
+              <div class="price-mo">Enterprise · CUDA pre-installed</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout green">
+      <strong>Best pick for Qwen2.5-Coder 32B:</strong> RTX 4090 on Vast.ai from $0.33/hr ($241/mo). The L40S from $0.31/hr is technically cheaper and gives more headroom — worth checking availability. RTX 3090 ($0.09/hr) is the absolute cheapest option but runs slightly slower due to lack of native MXFP4 support.
+    </div>
+  </div>
+
+  <!-- GPT-OSS TABLE -->
+  <div class="model-section" id="section-gptoss">
+    <div class="section-hdr">
+      <div class="section-title">GPT-OSS 20B · MXFP4</div>
+      <div class="section-req">Min 16 GB VRAM · 24 GB recommended for production</div>
+    </div>
+
+    <div class="controls-row">
+      <div class="legend">
+        <div class="leg"><div class="leg-dot" style="background:var(--accent)"></div>Vast.ai</div>
+        <div class="leg"><div class="leg-dot" style="background:var(--green)"></div>RunPod</div>
+        <div class="leg"><div class="leg-dot" style="background:var(--purple)"></div>Nebius</div>
+      </div>
+      <div class="view-toggle">
+        <button class="view-btn active" onclick="setView('hr',this)">Per hr</button>
+        <button class="view-btn" onclick="setView('mo',this)">Per mo</button>
+      </div>
+    </div>
+
+    <!-- TIER 1: 16 GB -->
+    <div class="tier-label">16 GB — minimum, reduced context window</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>GPU</th><th>VRAM</th><th>Fit</th>
+            <th>Vast.ai</th><th>RunPod</th><th>Nebius</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="gpu-name">RTX A4000</div></td>
+            <td><span class="vram-badge">16 GB</span></td>
+            <td><span class="fit-badge fit-good">Works</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.08 – $0.10</div>
+              <div class="price-hr show-mo" style="display:none">$58 – $73</div>
+              <div class="price-mo">Absolute cheapest option <span class="cheapest-tag">lowest price</span></div>
+            </td>
+            <td><span class="na">— not listed</span></td>
+            <td><span class="na">— not listed</span></td>
+          </tr>
+          <tr>
+            <td><div class="gpu-name">RTX 4080</div></td>
+            <td><span class="vram-badge">16 GB</span></td>
+            <td><span class="fit-badge fit-good">Works</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.14 – $0.15</div>
+              <div class="price-hr show-mo" style="display:none">$102 – $110</div>
+              <div class="price-mo">Ada arch · faster than A4000</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.16 – $0.27</div>
+              <div class="price-hr show-mo" style="display:none">$117 – $197</div>
+              <div class="price-mo">Community / Secure</div>
+            </td>
+            <td><span class="na">— not listed</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- TIER 2: 24 GB -->
+    <div class="tier-label">24 GB — recommended for production</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>GPU</th><th>VRAM</th><th>Fit</th>
+            <th>Vast.ai</th><th>RunPod</th><th>Nebius</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="gpu-name">RTX 3090</div></td>
+            <td><span class="vram-badge">24 GB</span></td>
+            <td><span class="fit-badge fit-good">Works</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.09 – $0.21</div>
+              <div class="price-hr show-mo" style="display:none">$66 – $153</div>
+              <div class="price-mo">Cheapest 24 GB card</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.11 – $0.27</div>
+              <div class="price-hr show-mo" style="display:none">$80 – $197</div>
+              <div class="price-mo">Community / Secure</div>
+            </td>
+            <td><span class="na">— not listed</span></td>
+          </tr>
+          <tr>
+            <td><div class="gpu-name">RTX A5000</div></td>
+            <td><span class="vram-badge">24 GB</span></td>
+            <td><span class="fit-badge fit-good">Works</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.19 – $0.20</div>
+              <div class="price-hr show-mo" style="display:none">$139 – $146</div>
+              <div class="price-mo">Ampere workstation</div>
+            </td>
+            <td><span class="na">— not listed</span></td>
+            <td><span class="na">— not listed</span></td>
+          </tr>
+          <tr class="winner">
+            <td><div class="gpu-name">RTX 4090 <span class="star">★</span></div></td>
+            <td><span class="vram-badge">24 GB</span></td>
+            <td><span class="fit-badge fit-best">Best</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.33 – $0.56</div>
+              <div class="price-hr show-mo" style="display:none">$241 – $409</div>
+              <div class="price-mo">Native MXFP4 · fastest 24 GB</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.39 – $0.59</div>
+              <div class="price-hr show-mo" style="display:none">$285 – $431</div>
+              <div class="price-mo">Community / Secure</div>
+            </td>
+            <td><span class="na">— not listed</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- TIER 3: 48 GB -->
+    <div class="tier-label">48 GB — full context, maximum throughput</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>GPU</th><th>VRAM</th><th>Fit</th>
+            <th>Vast.ai</th><th>RunPod</th><th>Nebius</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="winner">
+            <td><div class="gpu-name">L40S <span class="star">★</span></div></td>
+            <td><span class="vram-badge">48 GB</span></td>
+            <td><span class="fit-badge fit-best">Best</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.31 – $0.68</div>
+              <div class="price-hr show-mo" style="display:none">$226 – $496</div>
+              <div class="price-mo">Ada · best 48 GB value</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.40 – $0.79</div>
+              <div class="price-hr show-mo" style="display:none">$292 – $577</div>
+              <div class="price-mo">Community / Secure</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$1.55</div>
+              <div class="price-hr show-mo" style="display:none">$1,132</div>
+              <div class="price-mo">Enterprise infra</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="gpu-name">A40 / RTX A6000</div></td>
+            <td><span class="vram-badge">48 GB</span></td>
+            <td><span class="fit-badge fit-best">Best</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.32 – $0.47</div>
+              <div class="price-hr show-mo" style="display:none">$234 – $343</div>
+              <div class="price-mo">Ampere · solid value</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.40</div>
+              <div class="price-hr show-mo" style="display:none">$292</div>
+              <div class="price-mo">Community only</div>
+            </td>
+            <td><span class="na">— not listed</span></td>
+          </tr>
+          <tr>
+            <td><div class="gpu-name">A100 SXM 80 GB</div></td>
+            <td><span class="vram-badge">80 GB</span></td>
+            <td><span class="fit-badge fit-best">Best</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.67 – $0.87</div>
+              <div class="price-hr show-mo" style="display:none">$489 – $635</div>
+              <div class="price-mo">Both models simultaneously</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$0.79 – $1.39</div>
+              <div class="price-hr show-mo" style="display:none">$577 – $1,015</div>
+              <div class="price-mo">Community / Secure</div>
+            </td>
+            <td><span class="na">— not listed</span></td>
+          </tr>
+          <tr>
+            <td><div class="gpu-name">H100 80 GB</div></td>
+            <td><span class="vram-badge">80 GB</span></td>
+            <td><span class="fit-badge fit-best">Best</span></td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$1.55 – $2.27</div>
+              <div class="price-hr show-mo" style="display:none">$1,132 – $1,657</div>
+              <div class="price-mo">Fastest · both models fit</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$1.35 – $2.69</div>
+              <div class="price-hr show-mo" style="display:none">$986 – $1,964</div>
+              <div class="price-mo">PCIe (low) to SXM (high)</div>
+            </td>
+            <td class="price-cell">
+              <div class="price-hr show-hr">$3.06</div>
+              <div class="price-hr show-mo" style="display:none">$2,234</div>
+              <div class="price-mo">Enterprise · EU data residency</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout amber">
+      <strong>Note on GPT-OSS 20B:</strong> Requires a special vLLM build — standard <code>pip install vllm</code> won't work. Use: <code>uv pip install --pre vllm==0.10.1+gptoss --extra-index-url https://wheels.vllm.ai/gpt-oss/</code>. The RTX A4000 ($0.08/hr on Vast.ai) is the absolute cheapest way to run it, though 16 GB limits context length. RTX 4090 is the recommended production pick.
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    <div>Prices from <a href="https://computeprices.com/providers/vast" target="_blank">computeprices.com/providers/vast</a> · <a href="https://computeprices.com/providers/runpod" target="_blank">computeprices.com/providers/runpod</a> · <a href="https://computeprices.com/providers/nebius" target="_blank">computeprices.com/providers/nebius</a></div>
+    <div style="margin-top:6px">Monthly = hourly × 730 hrs · Prices change frequently — verify before committing · Nebius only lists L40S, H100, H200, B200</div>
+  </footer>
+
+</div>
+
+<script>
+function showModel(model, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.model-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('section-' + model).classList.add('active');
+
+  // Update stat strip
+  if (model === 'qwen') {
+    document.getElementById('stat-vram').textContent = '24 GB';
+    document.getElementById('stat-cheapest-gpu').textContent = 'RTX 3090';
+    document.getElementById('stat-cheapest-sub').textContent = 'Vast.ai from $0.09/hr';
+    document.getElementById('stat-best').textContent = 'RTX 4090';
+    document.getElementById('stat-best-sub').textContent = 'Best perf per dollar';
+    document.getElementById('stat-mo').textContent = '$66/mo';
+    document.getElementById('stat-mo-sub').textContent = 'RTX 3090 low · Vast.ai';
+  } else {
+    document.getElementById('stat-vram').textContent = '16 GB';
+    document.getElementById('stat-cheapest-gpu').textContent = 'RTX A4000';
+    document.getElementById('stat-cheapest-sub').textContent = 'Vast.ai from $0.08/hr';
+    document.getElementById('stat-best').textContent = 'RTX 4090';
+    document.getElementById('stat-best-sub').textContent = 'Best perf · native MXFP4';
+    document.getElementById('stat-mo').textContent = '$58/mo';
+    document.getElementById('stat-mo-sub').textContent = 'RTX A4000 low · Vast.ai';
+  }
+}
+
+function setView(view, btn) {
+  // Toggle all view buttons in the same controls-row
+  const row = btn.closest('.controls-row');
+  row.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  // Show/hide price elements in the active section
+  const activeSection = document.querySelector('.model-section.active');
+  activeSection.querySelectorAll('.show-hr').forEach(el => {
+    el.style.display = view === 'hr' ? '' : 'none';
+  });
+  activeSection.querySelectorAll('.show-mo').forEach(el => {
+    el.style.display = view === 'mo' ? '' : 'none';
+  });
+}
+</script>
+</body>
+</html>
